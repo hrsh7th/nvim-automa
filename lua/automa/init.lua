@@ -71,6 +71,13 @@ function P.on_key(_, typed)
   local bufnr = vim.api.nvim_get_current_buf()
   local changenr = vim.fn.changenr()
   local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local is_separator = typed == Event.dummy
+  local is_automa_key = not is_separator and (mode == 'n' and P.config.mapping[Keymap.normalize(vim.fn.keytrans(typed))] ~= nil)
+
+  -- ignore automa defined key.
+  if is_automa_key then
+    return
+  end
 
   -- fix changedtick & changenr when accepting next key event.
   if not P.prev_event.fixed then
@@ -83,17 +90,14 @@ function P.on_key(_, typed)
     P.prev_event.changedtick = changedtick
     do
       local e = P.prev_event
-      P.debug(('%s -> %s'):format(#P.events, tostring(e)))
+      P.debug(('%s: %s'):format(#P.events, tostring(e)))
     end
   end
 
-  local is_separator = false
-  is_separator = is_separator or typed == Event.dummy
-  is_separator = is_separator or 'n' and P.config.mapping[Keymap.normalize(vim.fn.keytrans(typed))] ~= nil
   local e = setmetatable({
     separator = is_separator,
     fixed = false,
-    char = is_separator and '' or typed,
+    char = typed,
     mode = mode,
     move = false,
     edit = false,
@@ -187,9 +191,7 @@ function M.fetch(key)
     end
   end
 
-  local s_event = P.events[target.s_idx]
-  local e_event = P.events[target.e_idx]
-  P.debug(('>>> %s:%s / %s -> %s /  %s'):format(target.s_idx, target.e_idx, s_event.changedtick, e_event.changedtick, target.typed))
+  P.debug(('>>> s%s:e%s `%s`'):format(target.s_idx, target.e_idx, target.typed))
 
   return target.typed
 end
