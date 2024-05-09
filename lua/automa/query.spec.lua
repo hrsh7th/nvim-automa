@@ -1,0 +1,15 @@
+local Query = require('automa.query')
+local automa = require('automa')
+local Spec = require('automa.kit.Spec')
+
+automa.setup({})
+
+describe('automa.query', function()
+  it('parse', function()
+    local query = Query.make_query({ '!n(h,j,k,l)*' })
+    Spec.setup('fo|o')
+    vim.api.nvim_feedkeys(vim.keycode('diwibar<Esc>'), 'tx', true)
+    Spec.expect('ba|r')
+    assert.are.same(query(automa.events()), { s_idx = 1, e_idx = 8, typed = vim.keycode('diwibar<Esc>') })
+  end)
+end)
