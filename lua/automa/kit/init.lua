@@ -329,4 +329,20 @@ function kit.set(value, path, new_value)
   current[path[#path]] = new_value
 end
 
+---String dedent.
+function kit.dedent(s)
+  local lines = vim.split(s, '\n')
+  if lines[1]:match('^%s*$') then
+    table.remove(lines, 1)
+  end
+  if lines[#lines]:match('^%s*$') then
+    table.remove(lines, #lines)
+  end
+  local base_indent = lines[1]:match('^%s*')
+  for i, line in ipairs(lines) do
+    lines[i] = line:gsub('^' .. base_indent, '')
+  end
+  return table.concat(lines, '\n')
+end
+
 return kit

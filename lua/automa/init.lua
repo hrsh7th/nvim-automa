@@ -23,7 +23,7 @@ local Keymap = require('automa.kit.Vim.Keymap')
 ---@alias automa.Query fun(events: automa.Event[]): { s_idx: integer, e_idx: integer, typed: string }?
 
 ---@class automa.Config
----@field mapping table<string, string[][]>
+---@field mapping table<string, automa.Query[]>
 
 local P = {
   ---@type automa.Config
@@ -135,7 +135,49 @@ function M.setup(user_config)
   -- Initialize queries.
   do
     for key, query_sources in pairs(P.config.mapping) do
-      P.queries[key] = kit.map(query_sources, Query.make_query)
+      if type(query_sources) ~= 'table' then
+        error('The query sources must be a table.')
+      end
+      if #query_sources == 0 then
+        error('The query sources must not be empty.')
+      end
+
+      -- normalize old style configurtion format.
+      for i, query_source in ipairs(query_sources) do
+        if type(query_source) == 'table' then
+          vim.deprecate(
+             '\n' .. kit.dedent([[
+                ```
+                require('automa').setup {
+                  mapping = {
+                    [...] = {
+                      { ... } ← this format of configuration is deprecated.
+                    }
+                  }
+                }
+                ```
+              ]]) .. '\n',
+            '\n' .. kit.dedent([[
+                ```
+                local automa = require('automa')
+                automa.setup {
+                  mapping = {
+                    [...] = {
+                      automa.query_v1({ ... }) ← use this format instead.
+                    }
+                  }
+                }
+                ```
+              ]]) .. '\n',
+            '0.0.0',
+            'nvim-automa',
+            false
+          )
+          query_sources[i] = Query.make_query(query_source --[=[@as string[]]=])
+        end
+      end
+
+      P.queries[key] = query_sources
     end
   end
 
@@ -143,6 +185,13 @@ function M.setup(user_config)
   do
     vim.on_key(P.on_key, P.namespace)
   end
+end
+
+---Query function for the old style configuration.
+---@param query_source string[]
+---@return automa.Query
+function M.query_v1(query_source)
+  return Query.make_query(query_source)
 end
 
 ---Get events

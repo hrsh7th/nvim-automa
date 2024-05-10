@@ -48,17 +48,18 @@ You can use `:AutomaToggleDebugger` for it.
 You can change query definition by yourself.
 
 ```lua
-require'automa'.setup({
+local automa = require('automa')
+automa.setup({
   mapping = {
     ['.'] = {
       -- for `diwi***<Esc>`
-      { 'n', 'no+', 'n', 'i*' },
+      automa.query_v1({ 'n', 'no+', 'n', 'i*' }),
       -- for `x`
-      { 'n#' },
+      automa.query_v1({ 'n#' }),
       -- for `i***<Esc>`
-      { 'n', 'i*' },
+      automa.query_v1({ 'n', 'i*' }),
       -- for `vjjj>`
-      { 'n', 'v*' },
+      automa.query_v1({ 'n', 'v*' }),
     },
   }
 })
