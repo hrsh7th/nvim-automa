@@ -12,12 +12,13 @@ Plug 'nvim-automa'
 ## Usage
 
 ```lua
-require'automa'.setup({
+local automa = require'automa'
+automa.setup({
   mapping = {
     ['.'] = {
       queries = {
         -- wide-range dot-repeat definition.
-        { '!n(h,j,k,l)+' },
+        automa.query_v1({ '!n(h,j,k,l)+' }),
       }
     },
   }
