@@ -15,8 +15,10 @@ Plug 'nvim-automa'
 require'automa'.setup({
   mapping = {
     ['.'] = {
-      -- wide-range dot-repeat definition.
-      { '!n(h,j,k,l)+' },
+      queries = {
+        -- wide-range dot-repeat definition.
+        { '!n(h,j,k,l)+' },
+      }
     },
   }
 })
@@ -52,16 +54,78 @@ local automa = require('automa')
 automa.setup({
   mapping = {
     ['.'] = {
-      -- for `diwi***<Esc>`
-      automa.query_v1({ 'n', 'no+', 'n', 'i*' }),
-      -- for `x`
-      automa.query_v1({ 'n#' }),
-      -- for `i***<Esc>`
-      automa.query_v1({ 'n', 'i*' }),
-      -- for `vjjj>`
-      automa.query_v1({ 'n', 'v*' }),
+      queries = {
+        -- for `diwi***<Esc>`
+        automa.query_v1({ 'n', 'no+', 'n', 'i*' }),
+        -- for `x`
+        automa.query_v1({ 'n#' }),
+        -- for `i***<Esc>`
+        automa.query_v1({ 'n', 'i*' }),
+        -- for `vjjj>`
+        automa.query_v1({ 'n', 'v*' }),
+      }
     },
   }
 })
 ```
 
+### How to replace captured repeat keys?
+
+There are two ways to accomplish this.
+
+##### 1. You can define your own `automa.Query` function.
+
+```lua
+local automa = require('automa')
+automa.setup {
+  mapping = {
+    ['.'] = {
+      queries = {
+
+        ...
+
+        function(events)
+          local result = automa.query_v1({ 'n', 'V*' })(events)
+          if result then
+            return {
+              s_idx = result.s_idx,
+              e_idx = result.e_idx,
+              typed = vim.keycode('<Cmd>normal! .<CR>')
+            }
+          end
+        end,
+
+        ...
+
+      }
+    },
+  }
+}
+```
+
+##### 2. You can use `convert` option.
+
+```lua
+local automa = require('automa')
+automa.setup {
+  mapping = {
+    ['.'] = {
+      convert = function(result)
+        if result.typed:match('[><]$') then
+          result.typed = vim.keycode('<Cmd>normal! .<CR>')
+        end
+        return result
+      end,
+      queries = {
+
+        ...
+
+        automa.query_v1({ 'n', 'V*' })
+
+        ...
+
+      }
+    },
+  }
+}
+```

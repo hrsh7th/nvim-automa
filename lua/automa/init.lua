@@ -20,19 +20,20 @@ local Keymap = require('automa.kit.Vim.Keymap')
 ---@field many boolean
 ---@field __call fun(events: automa.Event[], index: integer): boolean, integer
 
----@alias automa.Query fun(events: automa.Event[]): { s_idx: integer, e_idx: integer, typed: string }?
+---@class automa.QueryResult
+---@field s_idx integer
+---@field e_idx integer
+---@field typed string
+---@alias automa.Query fun(events: automa.Event[]): automa.QueryResult?
 
 ---@class automa.Config
----@field mapping table<string, automa.Query[]>
+---@field mapping table<string, { convert?: fun(result: automa.QueryResult): automa.QueryResult, queries: automa.Query[] }>
 
 local P = {
   ---@type automa.Config
   config = {
     mapping = {}
   },
-
-  ---@type table<string, automa.Query[]>
-  queries = {},
 
   ---@type automa.Event[]
   events = {},
@@ -132,55 +133,6 @@ function M.setup(user_config)
     end
   end
 
-  -- Initialize queries.
-  do
-    for key, query_sources in pairs(P.config.mapping) do
-      if type(query_sources) ~= 'table' then
-        error('The query sources must be a table.')
-      end
-      if #query_sources == 0 then
-        error('The query sources must not be empty.')
-      end
-
-      -- normalize old style configurtion format.
-      for i, query_source in ipairs(query_sources) do
-        if type(query_source) == 'table' then
-          vim.deprecate(
-             '\n' .. kit.dedent([[
-                ```
-                require('automa').setup {
-                  mapping = {
-                    [...] = {
-                      { ... } ← this format of configuration is deprecated.
-                    }
-                  }
-                }
-                ```
-              ]]) .. '\n',
-            '\n' .. kit.dedent([[
-                ```
-                local automa = require('automa')
-                automa.setup {
-                  mapping = {
-                    [...] = {
-                      automa.query_v1({ ... }) ← use this format instead.
-                    }
-                  }
-                }
-                ```
-              ]]) .. '\n',
-            '0.0.0',
-            'nvim-automa',
-            false
-          )
-          query_sources[i] = Query.make_query(query_source --[=[@as string[]]=])
-        end
-      end
-
-      P.queries[key] = query_sources
-    end
-  end
-
   -- Initialize `vim.on_key`
   do
     vim.on_key(P.on_key, P.namespace)
@@ -212,12 +164,12 @@ end
 function M.fetch(key)
   P.on_key(_, Event.dummy)
 
-  local queries = kit.get(P.queries, key) --[=[@as automa.Query[]]=]
+  local queries = kit.get(P.config, { 'mapping', key, 'queries' }) --[=[@as automa.Query[]]=]
   if not queries then
     error('The specified key is not defined in the mapping.')
   end
 
-  local candidates = {}
+  local candidates = {} ---@type automa.QueryResult[]
   for _, query in ipairs(queries) do
     local candidate = query(P.events)
     if candidate then
@@ -238,6 +190,11 @@ function M.fetch(key)
         target = candidate
       end
     end
+  end
+
+  local convert = kit.get(P.config, { 'mapping', key, 'convert' })
+  if convert then
+    target = convert(target)
   end
 
   P.debug(('>>> s%s:e%s `%s`'):format(target.s_idx, target.e_idx, target.typed))
