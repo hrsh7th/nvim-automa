@@ -27,7 +27,9 @@ local Keymap = require('automa.kit.Vim.Keymap')
 ---@alias automa.Query fun(events: automa.Event[]): automa.QueryResult?
 
 ---@class automa.Config
----@field mapping table<string, { convert?: fun(result: automa.QueryResult): automa.QueryResult, queries: automa.Query[] }>
+---@field public mapping table<string, { convert?: fun(result: automa.QueryResult): automa.QueryResult, queries: automa.Query[] }>
+---@field public on_exec? fun()
+---@field public on_done? fun()
 
 local P = {
   ---@type automa.Config
@@ -199,7 +201,19 @@ function M.fetch(key)
 
   P.debug(('>>> s%s:e%s `%s`'):format(target.s_idx, target.e_idx, target.typed))
 
-  return target.typed
+  return vim.keycode('<Cmd>lua require("automa").___on_exec()<CR>') .. target.typed .. vim.keycode('<Cmd>lua require("automa").___on_done()<CR>')
+end
+
+function M.___on_exec()
+  if P.config.on_exec then
+    P.config.on_exec()
+  end
+end
+
+function M.___on_done()
+  if P.config.on_done then
+    P.config.on_done()
+  end
 end
 
 ---Toggle debug panel.
