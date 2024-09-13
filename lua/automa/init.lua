@@ -201,7 +201,7 @@ function M.fetch(key)
 
   P.debug(('>>> s%s:e%s `%s`'):format(target.s_idx, target.e_idx, target.typed))
 
-  return vim.keycode('<Cmd>lua require("automa").___on_exec()<CR>') .. target.typed .. vim.keycode('<Cmd>lua require("automa").___on_done()<CR>')
+  return vim.keycode('<Cmd>lua require("automa").___on_exec()<CR>') .. target.typed .. vim.keycode('<Esc><Cmd>lua require("automa").___on_done()<CR>')
 end
 
 function M.___on_exec()
