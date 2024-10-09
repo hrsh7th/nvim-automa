@@ -226,7 +226,7 @@ function Query.make_query(query_source)
       return
     end
 
-    local target = candidates[1]
+    local target = candidates[1] ---@type automa.QueryResult
     for _, candidate in ipairs(candidates) do
       if target.e_idx < candidate.e_idx then
         target = candidate
@@ -237,6 +237,7 @@ function Query.make_query(query_source)
       end
     end
 
+    target.reginfo = events[target.s_idx].reginfo
     target.typed = ''
     for i = target.s_idx, target.e_idx do
       target.typed = target.typed .. events[i].char

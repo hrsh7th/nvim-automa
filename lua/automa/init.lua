@@ -12,6 +12,7 @@ local Keymap = require('automa.kit.Vim.Keymap')
 ---@field bufnr integer
 ---@field changenr integer
 ---@field changedtick integer
+---@field reginfo string
 
 ---@class automa.Matcher
 ---@field negate boolean
@@ -23,6 +24,7 @@ local Keymap = require('automa.kit.Vim.Keymap')
 ---@class automa.QueryResult
 ---@field s_idx integer
 ---@field e_idx integer
+---@field reginfo string
 ---@field typed string
 ---@alias automa.Query fun(events: automa.Event[]): automa.QueryResult?
 
@@ -39,6 +41,9 @@ local P = {
 
   ---@type automa.Event[]
   events = {},
+
+  ---@type { regcntents: string[], regtype: string, isunnamed: boolean, points_to: string }
+  reginfo = vim.fn.getreginfo(),
 
   ---@type { win: integer, buf: integer }
   debugger = {
@@ -107,6 +112,7 @@ function P.on_key(_, typed)
     bufnr = bufnr,
     changenr = changenr,
     changedtick = changedtick,
+    reginfo = P.reginfo,
   }, Event.prototype)
   table.insert(P.events, e)
   P.prev_event = e
@@ -138,6 +144,20 @@ function M.setup(user_config)
   -- Initialize `vim.on_key`
   do
     vim.on_key(P.on_key, P.namespace)
+  end
+
+  -- Initialize TextYankPost
+  do
+    local augroup = vim.api.nvim_create_augroup('automa', {
+      clear = true
+    })
+    vim.api.nvim_create_autocmd('TextYankPost', {
+      group = augroup,
+      pattern = '*',
+      callback = function()
+        P.reginfo = vim.fn.getreginfo()
+      end
+    })
   end
 end
 
@@ -201,19 +221,18 @@ function M.fetch(key)
 
   P.debug(('>>> s%s:e%s `%s`'):format(target.s_idx, target.e_idx, target.typed))
 
-  return vim.keycode('<Cmd>lua require("automa").___on_exec()<CR>') .. target.typed .. vim.keycode('<Esc><Cmd>lua require("automa").___on_done()<CR>')
-end
-
-function M.___on_exec()
-  if P.config.on_exec then
-    P.config.on_exec()
-  end
-end
-
-function M.___on_done()
-  if P.config.on_done then
-    P.config.on_done()
-  end
+  local reg = vim.fn.getreg(vim.v.register)
+  return Keymap.to_sendable(function()
+    if P.config.on_exec then
+      P.config.on_exec()
+    end
+    vim.fn.setreg(vim.v.register, target.reginfo)
+  end) .. target.typed .. Keymap.termcodes('<Esc>') .. Keymap.to_sendable(function()
+    vim.fn.setreg(vim.v.register, reg)
+    if P.config.on_done then
+      P.config.on_done()
+    end
+  end)
 end
 
 ---Toggle debug panel.
