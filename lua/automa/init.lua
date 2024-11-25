@@ -29,7 +29,7 @@ local Keymap = require('automa.kit.Vim.Keymap')
 ---@alias automa.Query fun(events: automa.Event[]): automa.QueryResult?
 
 ---@class automa.Config
----@field public mapping table<string, { convert?: fun(result: automa.QueryResult): automa.QueryResult, queries: automa.Query[] }>
+---@field public mapping table<string, { convert?: (fun(result: automa.QueryResult): automa.QueryResult), queries: automa.Query[] }>
 ---@field public on_exec? fun()
 ---@field public on_done? fun()
 
@@ -156,6 +156,7 @@ function M.setup(user_config)
       pattern = '*',
       callback = function()
         P.reginfo = vim.fn.getreginfo()
+        P.debug(('<<<TextYankPost>>> %s'):format(P.reginfo.regcntents))
       end
     })
   end
@@ -219,7 +220,7 @@ function M.fetch(key)
     target = convert(target)
   end
 
-  P.debug(('>>> s%s:e%s `%s`'):format(target.s_idx, target.e_idx, target.typed))
+  P.debug(('<<<s%s:e%s>>> %s'):format(target.s_idx, target.e_idx, vim.fn.keytrans(target.typed)))
 
   local reg = vim.fn.getreg(vim.v.register)
   return Keymap.to_sendable(function()

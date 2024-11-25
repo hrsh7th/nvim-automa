@@ -135,7 +135,7 @@ local function make_matcher(q)
             end
           end
           if #self.chars > 0 then
-            if not kit.contains(kit.map(self.chars, vim.keycode), event.char) then
+            if not vim.tbl_contains(vim.iter(self.chars):map(vim.keycode):totable(), event.char) then
               return false
             end
           end

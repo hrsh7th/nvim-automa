@@ -3,12 +3,11 @@ local Event = {}
 Event.prototype = {
   __tostring = function(self)
     return string.format(
-      '%s%s(%s)%s%s',
+      '%s%s(%s)%s',
       self.separator and '---------- ' or '',
       self.mode,
       self.char == Event.dummy and 'dummy' or vim.fn.keytrans(self.char),
-      self.edit and '#' or '',
-      self.reginfo == '' and '' or ('@' .. vim.inspect(self.reginfo))
+      self.edit and '#' or ''
     )
   end
 }

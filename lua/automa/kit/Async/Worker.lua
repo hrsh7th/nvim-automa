@@ -5,6 +5,7 @@ local AsyncTask = require('automa.kit.Async.AsyncTask')
 ---@field public runtimepath string[]
 
 ---@class automa.kit.Async.Worker
+---@field private runner string
 local Worker = {}
 Worker.__index = Worker
 
@@ -33,7 +34,7 @@ function Worker:__call(...)
 
       --Run runner function.
       local ok, res = pcall(function()
-        return require('automa.kit.Async.AsyncTask').resolve(assert(loadstring(runner))(unpack(args))):sync()
+        return require('automa.kit.Async.AsyncTask').resolve(assert(loadstring(runner))(unpack(args))):sync(5000)
       end)
 
       res = vim.mpack.encode({ res })
