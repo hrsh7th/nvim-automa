@@ -1,6 +1,221 @@
 -- luacheck: ignore 512
 
+---@class automa.kit.buffer.Buffer
+---@field put fun(data: string)
+---@field get fun(byte_size?: integer): string
+---@field len integer
+---@field skip fun(byte_size: integer)
+---@field peek fun(index: integer): integer?
+---@field clear fun()
+---@field reserve fun(byte_size: integer)
+---@field iter_bytes fun(): fun(): integer, integer
+
 local kit = {}
+
+do
+  local buffer = package.preload['string.buffer'] and require('string.buffer')
+  if buffer then
+    ---Create buffer object.
+    ---@return automa.kit.buffer.Buffer
+    function kit.buffer_jit()
+      local buf = buffer.new()
+      local ptr, len = buf:ref()
+      ---@type automa.kit.buffer.Buffer
+      return setmetatable({
+        put = function(data)
+          buf:put(data)
+          ptr, len = buf:ref()
+        end,
+        get = function(byte_size)
+          local o = buf:get(byte_size)
+          ptr, len = buf:ref()
+          return o
+        end,
+        len = function()
+          return len
+        end,
+        skip = function(byte_size)
+          buf:skip(byte_size)
+          ptr, len = buf:ref()
+        end,
+        clear = function()
+          buf:reset()
+          ptr, len = buf:ref()
+        end,
+        peek = function(index)
+          if index < 1 or index > len then
+            return nil
+          end
+          return ptr[index - 1]
+        end,
+        reserve = function(byte_size)
+          buf:reserve(byte_size)
+        end,
+        iter_bytes = function()
+          local i = 0
+          return function()
+            if i < len then
+              local byte = ptr[i]
+              i = i + 1
+              return i, byte
+            end
+          end
+        end,
+      }, {
+        __tostring = function()
+          return buf:tostring()
+        end,
+      })
+    end
+  end
+end
+
+---Create buffer object.
+---@return automa.kit.buffer.Buffer
+function kit.buffer_tbl()
+  local tmp_get = {}
+  local buf = {}
+  ---@type automa.kit.buffer.Buffer
+  local buffer
+  buffer = setmetatable({
+    put = function(data)
+      table.insert(buf, data)
+    end,
+    get = function(byte_size)
+      if byte_size == nil then
+        local data = table.concat(buf, '')
+        kit.clear(buf)
+        return data
+      end
+      if byte_size == 0 then
+        return ''
+      end
+
+      kit.clear(tmp_get)
+      local off = 0
+      local i = 1
+      while i <= #buf do
+        local b = buf[i]
+        if off + #b >= byte_size then
+          local data_size = byte_size - off
+          if #b <= data_size then
+            table.insert(tmp_get, b)
+            table.remove(buf, i)
+          else
+            table.insert(tmp_get, b:sub(1, data_size))
+            buf[i] = b:sub(data_size + 1)
+          end
+          break
+        end
+        i = i + 1
+        off = off + #b
+      end
+      return table.concat(tmp_get, '')
+    end,
+    len = function()
+      local len = 0
+      for _, data in ipairs(buf) do
+        len = len + #data
+      end
+      return len
+    end,
+    skip = function(byte_size)
+      buffer.get(byte_size)
+    end,
+    peek = function(index)
+      local i = 1
+      while i <= #buf do
+        if index <= #buf[i] then
+          return buf[i]:byte(index)
+        end
+        index = index - #buf[i]
+        i = i + 1
+      end
+    end,
+    clear = function()
+      kit.clear(buf)
+    end,
+    reserve = function()
+      -- noop
+    end,
+    iter_bytes = function()
+      local i = 1
+      local j = 1
+      local c = 1
+      return function()
+        while i <= #buf do
+          local data = buf[i]
+          if j <= #data then
+            local byte = data:byte(j)
+            j = j + 1
+            c = c + 1
+            return (c - 1), byte
+          end
+          i = i + 1
+          j = 1
+        end
+        return nil
+      end
+    end,
+  }, {
+    __tostring = function()
+      return table.concat(buf)
+    end,
+  })
+  return buffer
+end
+
+---Create buffer object.
+---@return automa.kit.buffer.Buffer
+kit.buffer = function()
+  return kit.buffer_jit and kit.buffer_jit() or kit.buffer_tbl()
+end
+
+do
+  local clear = package.preload['table.clear'] and require('table.clear')
+
+  ---Clear table.
+  ---@generic T: table
+  ---@param tbl T
+  ---@return T
+  kit.clear = function(tbl)
+    if type(tbl) ~= 'table' then
+      return tbl
+    end
+    if clear then
+      clear(tbl)
+    else
+      for k, _ in pairs(tbl) do
+        tbl[k] = nil
+      end
+    end
+    return tbl
+  end
+end
+
+---Check shallow equals.
+---@param a any
+---@param b any
+---@return boolean
+function kit.shallow_equals(a, b)
+  if type(a) ~= type(b) then
+    return false
+  end
+  if type(a) ~= 'table' then
+    return a == b
+  end
+  for k, v in pairs(a) do
+    if v ~= b[k] then
+      return false
+    end
+  end
+  for k, v in pairs(b) do
+    if v ~= a[k] then
+      return false
+    end
+  end
+  return true
+end
 
 ---Create gabage collection detector.
 ---@param callback fun(...: any): any
@@ -74,6 +289,7 @@ end
 ---Find up directory.
 ---@param path string
 ---@param markers string[]
+---@return string?
 function kit.findup(path, markers)
   path = vim.fs.normalize(path)
   if vim.fn.filereadable(path) == 1 then
@@ -82,9 +298,7 @@ function kit.findup(path, markers)
   while path ~= '/' do
     for _, marker in ipairs(markers) do
       local target = vim.fs.joinpath(path, (marker:gsub('/', '')))
-      if marker:match('/$') and vim.fn.isdirectory(target) == 1 then
-        return path
-      elseif vim.fn.filereadable(target) == 1 then
+      if vim.fn.isdirectory(target) == 1 or vim.fn.filereadable(target) == 1 then
         return path
       end
     end
@@ -92,16 +306,17 @@ function kit.findup(path, markers)
   end
 end
 
----Create unique id.
----@return integer
-kit.unique_id = setmetatable({
-  unique_id = 0,
-}, {
-  __call = function(self)
-    self.unique_id = self.unique_id + 1
-    return self.unique_id
-  end,
-})
+do
+  _G.kit = _G.kit or {}
+  _G.kit.unique_id = 0
+
+  ---Create unique id.
+  ---@return integer
+  kit.unique_id = function()
+    _G.kit.unique_id = _G.kit.unique_id + 1
+    return _G.kit.unique_id
+  end
+end
 
 ---Map array.
 ---@deprecated
@@ -164,60 +379,6 @@ function kit.set(value, path, new_value)
   current[path[#path]] = new_value
 end
 
----Create debounced callback.
----@generic T: fun(...: any): nil
----@param callback T
----@param ms integer
----@return T
-function kit.debounce(callback, ms)
-  local run_id = 0
-  local timer = assert(vim.uv.new_timer())
-  return function(...)
-    local arguments = { ... }
-
-    run_id = run_id + 1
-    timer:stop()
-    timer:start(ms, 0, function()
-      if run_id ~= run_id then
-        return
-      end
-      timer:stop()
-      callback(unpack(arguments))
-    end)
-  end
-end
-
----Create throttled callback.
----@generic T: fun(...: any): nil
----@param callback T
----@param throttle_ms integer
-function kit.throttle(callback, throttle_ms)
-  local timer = assert(vim.uv.new_timer())
-  local arguments = nil
-  local last_time = vim.uv.now() - throttle_ms
-  return setmetatable({
-    throttle_ms = throttle_ms,
-  }, {
-    __call = function(self, ...)
-      arguments = { ... }
-
-      local timeout_ms = self.throttle_ms - (vim.uv.now() - last_time)
-      if timeout_ms <= 0 then
-        timer:stop()
-        callback(unpack(arguments))
-        last_time = vim.uv.now()
-      else
-        timer:stop()
-        timer:start(timeout_ms, 0, function()
-          timer:stop()
-          callback(unpack(arguments))
-          last_time = vim.uv.now()
-        end)
-      end
-    end,
-  })
-end
-
 do
   ---@generic T
   ---@param target T
@@ -239,6 +400,10 @@ do
       return new_tbl
     else
       local new_tbl = {}
+      local meta = getmetatable(target)
+      if meta then
+        setmetatable(new_tbl, meta)
+      end
       seen[target] = new_tbl
       for k, v in pairs(target) do
         new_tbl[k] = do_clone(v, seen)
@@ -263,8 +428,8 @@ end
 ---@param tbl2 T
 ---@return T
 function kit.merge(tbl1, tbl2)
-  local is_dict1 = kit.is_dict(tbl1)
-  local is_dict2 = kit.is_dict(tbl2)
+  local is_dict1 = kit.is_dict(tbl1) and getmetatable(tbl1) == nil
+  local is_dict2 = kit.is_dict(tbl2) and getmetatable(tbl2) == nil
   if is_dict1 and is_dict2 then
     local new_tbl = {}
     for k, v in pairs(tbl2) do
@@ -300,12 +465,17 @@ end
 ---@return table
 function kit.concat(tbl1, ...)
   local new_tbl = {}
-  for _, item in ipairs(tbl1) do
-    table.insert(new_tbl, item)
+
+  local off = 0
+  for _, item in pairs(tbl1) do
+    new_tbl[off + 1] = item
+    off = off + 1
   end
+
   for _, tbl2 in ipairs({ ... }) do
-    for _, item in ipairs(tbl2) do
-      table.insert(new_tbl, item)
+    for _, item in pairs(kit.to_array(tbl2)) do
+      new_tbl[off + 1] = item
+      off = off + 1
     end
   end
   return new_tbl

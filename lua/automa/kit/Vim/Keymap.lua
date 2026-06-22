@@ -3,6 +3,8 @@ local Async = require('automa.kit.Async')
 
 local buf = vim.api.nvim_create_buf(false, true)
 
+local resolve_key = vim.api.nvim_replace_termcodes('<Cmd>lua require("automa.kit.Vim.Keymap")._resolve(%s)<CR>', true, true, true)
+
 ---@alias automa.kit.Vim.Keymap.Keys { keys: string, remap?: boolean }
 ---@alias automa.kit.Vim.Keymap.KeysSpecifier string|automa.kit.Vim.Keymap.Keys
 
@@ -17,7 +19,10 @@ end
 
 local Keymap = {}
 
-Keymap._callbacks = {}
+_G.kit = _G.kit or {}
+_G.kit.Vim = _G.kit.Vim or {}
+_G.kit.Vim.Keymap = _G.kit.Vim.Keymap or {}
+_G.kit.Vim.Keymap.callbacks = _G.kit.Vim.Keymap.callbacks or {}
 
 ---Replace termcodes.
 ---@param keys string
@@ -54,9 +59,9 @@ end
 function Keymap.send(keys, no_insert)
   local unique_id = kit.unique_id()
   return Async.new(function(resolve, _)
-    Keymap._callbacks[unique_id] = resolve
+    _G.kit.Vim.Keymap.callbacks[unique_id] = resolve
 
-    local callback = Keymap.termcodes(('<Cmd>lua require("automa.kit.Vim.Keymap")._resolve(%s)<CR>'):format(unique_id))
+    local callback = resolve_key:format(unique_id)
     if no_insert then
       for _, keys_ in ipairs(kit.to_array(keys)) do
         keys_ = to_keys(keys_)
@@ -71,7 +76,7 @@ function Keymap.send(keys, no_insert)
       end
     end
   end):catch(function()
-    Keymap._callbacks[unique_id] = nil
+    _G.kit.Vim.Keymap.callbacks[unique_id] = nil
   end)
 end
 
@@ -80,10 +85,10 @@ end
 ---@return string
 function Keymap.to_sendable(callback)
   local unique_id = kit.unique_id()
-  Keymap._callbacks[unique_id] = function()
+  _G.kit.Vim.Keymap.callbacks[unique_id] = function()
     Async.run(callback)
   end
-  return Keymap.termcodes(('<Cmd>lua require("automa.kit.Vim.Keymap")._resolve(%s)<CR>'):format(unique_id))
+  return resolve_key:format(unique_id)
 end
 
 ---Test spec helper.
@@ -101,8 +106,8 @@ end
 ---Resolve running keys.
 ---@param unique_id integer
 function Keymap._resolve(unique_id)
-  Keymap._callbacks[unique_id]()
-  Keymap._callbacks[unique_id] = nil
+  _G.kit.Vim.Keymap.callbacks[unique_id]()
+  _G.kit.Vim.Keymap.callbacks[unique_id] = nil
 end
 
 return Keymap

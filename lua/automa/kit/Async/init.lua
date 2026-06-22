@@ -43,61 +43,61 @@ function Async.new(runner)
   return AsyncTask.new(runner)
 end
 
----Run async function immediately.
----@generic A: ...
----@param runner fun(...: A): any
----@param ...? A
----@return automa.kit.Async.AsyncTask
-function Async.run(runner, ...)
-  local args = { ... }
-  if Async.in_context() then
-    return Async.new(function(resolve, reject)
-      local o = { pcall(runner, args) }
-      if o[1] then
-        resolve(unpack(o, 2))
+do
+  ---@param resolve fun(v: unknown)
+  ---@param reject fun(e: unknown)
+  ---@param thread thread
+  ---@param ok boolean
+  ---@param v unknown
+  local function next_step(resolve, reject, thread, ok, v)
+    if getmetatable(v) == Interrupt then
+      vim.defer_fn(function()
+        next_step(resolve, reject, thread, coroutine.resume(thread))
+      end, v.timeout)
+      return
+    end
+
+    if coroutine.status(thread) == 'dead' then
+      if AsyncTask.is(v) then
+        v:dispatch(resolve, reject)
       else
-        reject(unpack(o, 2))
+        if ok then
+          resolve(v)
+        else
+          reject(v)
+        end
       end
+      _G.kit.Async.___threads___[thread] = nil
+      return
+    end
+
+    v:dispatch(function(...)
+      next_step(resolve, reject, thread, coroutine.resume(thread, true, ...))
+    end, function(...)
+      next_step(resolve, reject, thread, coroutine.resume(thread, false, ...))
     end)
   end
 
-  local thread = coroutine.create(runner)
-  _G.kit.Async.___threads___[thread] = {
-    thread = thread,
-    now = os.clock() * 1000,
-  }
-  return AsyncTask.new(function(resolve, reject)
-    local function next_step(ok, v)
-      if getmetatable(v) == Interrupt then
-        vim.defer_fn(function()
-          next_step(coroutine.resume(thread))
-        end, v.timeout)
-        return
-      end
+  ---Run async function immediately.
+  ---@generic A: ...
+  ---@param runner fun(...: A): any
+  ---@param ...? A
+  ---@return automa.kit.Async.AsyncTask
+  function Async.run(runner, ...)
+    local args = { ... }
 
-      if coroutine.status(thread) == 'dead' then
-        _G.kit.Async.___threads___[thread] = nil
-        if AsyncTask.is(v) then
-          v:dispatch(resolve, reject)
-        else
-          if ok then
-            resolve(v)
-          else
-            reject(v)
-          end
-        end
-        return
-      end
+    local thread_parent = Async.in_context() and coroutine.running() or nil
 
-      v:dispatch(function(...)
-        next_step(coroutine.resume(thread, true, ...))
-      end, function(...)
-        next_step(coroutine.resume(thread, false, ...))
-      end)
-    end
-
-    next_step(coroutine.resume(thread, unpack(args)))
-  end)
+    local thread = coroutine.create(runner)
+    _G.kit.Async.___threads___[thread] = {
+      thread = thread,
+      thread_parent = thread_parent,
+      now = vim.uv.hrtime() / 1000000,
+    }
+    return AsyncTask.new(function(resolve, reject)
+      next_step(resolve, reject, thread, coroutine.resume(thread, unpack(args)))
+    end)
+  end
 end
 
 ---Return current context is async coroutine or not.
@@ -133,11 +133,25 @@ function Async.interrupt(interval, timeout)
     error('`Async.interrupt` must be called in async context.')
   end
 
-  local curr_now = os.clock() * 1000
-  local prev_now = _G.kit.Async.___threads___[thread].now
+  local thread_parent = thread
+  while true do
+    local next_thread_parent = _G.kit.Async.___threads___[thread_parent].thread_parent
+    if not next_thread_parent then
+      break
+    end
+    if not _G.kit.Async.___threads___[next_thread_parent] then
+      break
+    end
+    thread_parent = next_thread_parent
+  end
+
+  local prev_now = _G.kit.Async.___threads___[thread_parent].now
+  local curr_now = vim.uv.hrtime() / 1000000
   if (curr_now - prev_now) > interval then
     coroutine.yield(setmetatable({ timeout = timeout or 16 }, Interrupt))
-    _G.kit.Async.___threads___[thread].now = os.clock() * 1000
+    if _G.kit.Async.___threads___[thread_parent] then
+      _G.kit.Async.___threads___[thread_parent].now = vim.uv.hrtime() / 1000000
+    end
   end
 end
 

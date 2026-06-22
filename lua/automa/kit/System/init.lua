@@ -1,6 +1,12 @@
 -- luacheck: ignore 212
---
+
 local kit = require('automa.kit')
+local Async = require('automa.kit.Async')
+
+local bytes = {
+  ['\n'] = 10,
+  ['\r'] = 13,
+}
 
 local System = {}
 
@@ -25,85 +31,153 @@ function System.LineBuffering.new(option)
 end
 
 ---Create LineBuffer object.
+---@param callback fun(data: string)
 function System.LineBuffering:create(callback)
-  local buffer = {}
+  local ignore_empty = self.ignore_empty
+  local tail = ''
+  local callback_local = callback
+  local find = string.find
+  local sub = string.sub
+  local byte = string.byte
+  local byte_lf = bytes['\n']
+  local byte_cr = bytes['\r']
+  ---@type automa.kit.System.Buffer
   return {
     write = function(data)
-      data = (data:gsub('\r\n', '\n'))
-      data = (data:gsub('\r', '\n'))
-      table.insert(buffer, data)
-
-      local has = false
-      for i = #data, 1, -1 do
-        if data:sub(i, i) == '\n' then
-          has = true
-          break
-        end
+      if tail == '' and not find(data, '\n', 1, true) then
+        tail = data
+        return
       end
-
-      if has then
-        local texts = vim.split(table.concat(buffer, ''), '\n')
-        buffer = texts[#texts] ~= '' and { table.remove(texts) } or {}
-        for _, text in ipairs(texts) do
-          if self.ignore_empty then
-            if text:gsub('^%s*', ''):gsub('%s*$', '') ~= '' then
-              callback(text)
-            end
+      local chunk = tail ~= '' and (tail .. data) or data
+      local start = 1
+      local s = find(chunk, '\n', start, true)
+      if ignore_empty then
+        while s do
+          local line
+          if s > start and byte(chunk, s - 1) == byte_cr then
+            line = sub(chunk, start, s - 2)
           else
-            callback(text)
+            line = sub(chunk, start, s - 1)
           end
+          if line ~= '' then
+            callback_local(line)
+          end
+          start = s + 1
+          s = find(chunk, '\n', start, true)
+        end
+      else
+        while s do
+          if s > start and byte(chunk, s - 1) == byte_cr then
+            callback_local(sub(chunk, start, s - 2))
+          else
+            callback_local(sub(chunk, start, s - 1))
+          end
+          start = s + 1
+          s = find(chunk, '\n', start, true)
         end
       end
+      tail = start == 1 and chunk or sub(chunk, start)
     end,
     close = function()
-      if #buffer > 0 then
-        callback(table.concat(buffer, ''))
+      if not ignore_empty or tail ~= '' then
+        callback_local(tail)
       end
-    end
+      tail = ''
+    end,
   }
 end
 
----@class automa.kit.System.PatternBuffering: automa.kit.System.Buffering
----@field pattern string
-System.PatternBuffering = {}
-System.PatternBuffering.__index = System.PatternBuffering
+---@class automa.kit.System.DelimiterBuffering: automa.kit.System.Buffering
+---@field delimiter string
+System.DelimiterBuffering = {}
+System.DelimiterBuffering.__index = System.DelimiterBuffering
 
----Create PatternBuffering.
----@param option { pattern: string }
-function System.PatternBuffering.new(option)
+---Create Buffering.
+---@param option { delimiter: string }
+function System.DelimiterBuffering.new(option)
   return setmetatable({
-    pattern = option.pattern,
-  }, System.PatternBuffering)
+    delimiter = option.delimiter,
+  }, System.DelimiterBuffering)
 end
 
----Create PatternBuffer object.
-function System.PatternBuffering:create(callback)
-  local buffer = {}
+---Create Delimiter object.
+function System.DelimiterBuffering:create(callback)
+  local state = {
+    buffer = kit.buffer(),
+    tail = '',
+  }
+
+  local delimiter = self.delimiter
+  local delimiter_len = #delimiter
+  local tail_max = delimiter_len > 1 and (delimiter_len - 1) or 0
+  local find = string.find
+  local sub = string.sub
+  local buffer_put = state.buffer.put
+  local buffer_get = state.buffer.get
+  local buffer_len = state.buffer.len
+
   return {
     write = function(data)
-      while true do
-        local s, e = data:find(self.pattern)
-        if s then
-          table.insert(buffer, data:sub(1, s - 1))
-          callback(table.concat(buffer, ''))
-          buffer = {}
-
-          if e < #data then
-            data = data:sub(e + 1)
-          else
-            break
+      local chunk
+      if state.tail == '' then
+        local s = find(data, delimiter, 1, true)
+        if not s then
+          if tail_max == 0 then
+            if data ~= '' then
+              buffer_put(data)
+            end
+            return
           end
-        else
-          table.insert(buffer, data)
-          break
+          if #data > tail_max then
+            local cut = #data - tail_max
+            buffer_put(sub(data, 1, cut))
+            state.tail = sub(data, cut + 1)
+          else
+            state.tail = data
+          end
+          return
         end
+        chunk = data
+      else
+        chunk = state.tail .. data
+        state.tail = ''
       end
+      local search_start = 1
+      local s, e = find(chunk, delimiter, search_start, true)
+      while s do
+        if s > search_start then
+          buffer_put(sub(chunk, search_start, s - 1))
+        end
+        callback(buffer_get())
+        search_start = e + 1
+        s, e = find(chunk, delimiter, search_start, true)
+      end
+
+      local remainder = search_start == 1 and chunk or sub(chunk, search_start)
+      if tail_max == 0 then
+        if remainder ~= '' then
+          buffer_put(remainder)
+        end
+        state.tail = ''
+        return
+      end
+
+      if #remainder > tail_max then
+        local cut = #remainder - tail_max
+        buffer_put(sub(remainder, 1, cut))
+        remainder = sub(remainder, cut + 1)
+      end
+      state.tail = remainder
     end,
     close = function()
-      if #buffer > 0 then
-        callback(table.concat(buffer, ''))
+      if state.tail ~= '' then
+        buffer_put(state.tail)
+        state.tail = ''
       end
-    end
+      if buffer_len() > 0 then
+        callback(buffer_get())
+      end
+    end,
   }
 end
 
@@ -124,13 +198,14 @@ function System.RawBuffering:create(callback)
     end,
     close = function()
       -- noop.
-    end
+    end,
   }
 end
 
 ---Spawn a new process.
 ---@class automa.kit.System.SpawnParams
 ---@field cwd string
+---@field env? table<string, string>
 ---@field input? string|string[]
 ---@field on_stdout? fun(data: string)
 ---@field on_stderr? fun(data: string)
@@ -141,11 +216,11 @@ end
 ---@return fun(signal?: integer)
 function System.spawn(command, params)
   command = vim
-      .iter(command)
-      :filter(function(c)
-        return c ~= nil
-      end)
-      :totable()
+    .iter(command)
+    :filter(function(c)
+      return c ~= nil
+    end)
+    :totable()
 
   local cmd = command[1]
   local args = {}
@@ -153,7 +228,8 @@ function System.spawn(command, params)
     table.insert(args, command[i])
   end
 
-  local env = vim.fn.environ()
+  local env = params.env or {}
+  env = kit.merge(env, vim.fn.environ())
   env.NVIM = vim.v.servername
   env.NVIM_LISTEN_ADDRESS = nil
 
@@ -174,15 +250,13 @@ function System.spawn(command, params)
     end
   end)
 
-  local close --[[@type fun()]]
+  local close --[[@type fun(signal?: integer): automa.kit.Async.AsyncTask]]
   local stdin = params.input and assert(vim.uv.new_pipe())
   local stdout = assert(vim.uv.new_pipe())
   local stderr = assert(vim.uv.new_pipe())
   local process = vim.uv.spawn(vim.fn.exepath(cmd), {
     cwd = vim.fs.normalize(params.cwd),
     env = env_pairs,
-    gid = vim.uv.getgid(),
-    uid = vim.uv.getuid(),
     hide = true,
     args = args,
     stdio = { stdin, stdout, stderr },
@@ -191,10 +265,11 @@ function System.spawn(command, params)
   } --[[@as any]], function(code, signal)
     stdout_buffer.close()
     stderr_buffer.close()
-    close()
-    if params.on_exit then
-      params.on_exit(code, signal)
-    end
+    close():next(function()
+      if params.on_exit then
+        params.on_exit(code, signal)
+      end
+    end)
   end)
   stdout:read_start(function(err, data)
     if err then
@@ -213,30 +288,66 @@ function System.spawn(command, params)
     end
   end)
 
-  if params.input and stdin then
-    for _, input in ipairs(kit.to_array(params.input)) do
-      stdin:write(input)
+  local stdin_closing = Async.new(function(resolve)
+    if stdin then
+      for _, input in ipairs(kit.to_array(params.input)) do
+        stdin:write(input)
+      end
+      stdin:shutdown(function()
+        stdin:close(resolve)
+      end)
+    else
+      resolve()
     end
-    stdin:close()
-  end
+  end)
 
-  close = function()
-    if not stdout:is_closing() then
-      stdout:close()
+  close = function(signal)
+    local closing = { stdin_closing }
+    table.insert(
+      closing,
+      Async.new(function(resolve)
+        if not stdout:is_closing() then
+          stdout:close(resolve)
+        else
+          resolve()
+        end
+      end)
+    )
+    table.insert(
+      closing,
+      Async.new(function(resolve)
+        if not stderr:is_closing() then
+          stderr:close(resolve)
+        else
+          resolve()
+        end
+      end)
+    )
+    table.insert(
+      closing,
+      Async.new(function(resolve)
+        if signal and process:is_active() then
+          process:kill(signal)
+        end
+        if process and not process:is_closing() then
+          process:close(resolve)
+        else
+          resolve()
+        end
+      end)
+    )
+
+    local closing_task = Async.resolve()
+    for _, task in ipairs(closing) do
+      closing_task = closing_task:next(function()
+        return task
+      end)
     end
-    if not stderr:is_closing() then
-      stderr:close()
-    end
-    if not process:is_closing() then
-      process:close()
-    end
+    return closing_task
   end
 
   return function(signal)
-    if signal and process:is_active() and not process:is_closing() then
-      process:kill(signal)
-    end
-    close()
+    close(signal)
   end
 end
 
