@@ -56,6 +56,9 @@ local P = {
 
   ---@type automa.Event
   prev_event = kit.clone(Event.dummy),
+
+  ---@type boolean
+  executing = false,
 }
 
 ---Add debug message
@@ -224,16 +227,24 @@ function M.fetch(key)
 
   local reg = vim.fn.getreg(vim.v.register)
   return Keymap.to_sendable(function()
+    P.executing = true
     if P.config.on_exec then
       P.config.on_exec()
     end
     vim.fn.setreg(vim.v.register, target.reginfo)
   end) .. target.typed .. Keymap.termcodes('<Esc>') .. Keymap.to_sendable(function()
     vim.fn.setreg(vim.v.register, reg)
+    P.executing = false
     if P.config.on_done then
       P.config.on_done()
     end
   end)
+end
+
+---Return automa is executing or not.
+---@return boolean
+function M.executing()
+  return P.executing
 end
 
 ---Toggle debug panel.
